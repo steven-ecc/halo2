@@ -72,7 +72,7 @@ pub struct SingleConfigLayouter<'a, F: FieldExt, CS: Assignment<F> + 'a> {
     /// Constraint system
     pub cs: &'a mut CS,
     /// Stores the starting row for each region.
-    region_starts: Vec<RegionStart>,
+    pub region_starts: Vec<RegionStart>,
     /// Stores the columns used by each region.
     region_columns: Vec<Vec<Column<Any>>>,
     /// Stores the first empty row for each column.
@@ -138,7 +138,7 @@ impl<'a, F: FieldExt, CS: Assignment<F>> Layouter<F> for SingleConfigLayouter<'a
         }
 
         self.cs.enter_region(name);
-        let mut region = SingleConfigLayouterRegion::new(self, region_index.into());
+        let mut region = SingleConfigLayouterRegion::new(self, region_index);
         let result = {
             let region: &mut dyn RegionLayouter<C> = &mut region;
             assignment(region.into())
@@ -179,7 +179,7 @@ impl<'a, F: FieldExt, CS: Assignment<F>> Layouter<F> for SingleConfigLayouter<'a
         }
 
         self.cs.enter_region(name);
-        let mut region = SingleConfigLayouterRegion::new(self, region_index.into());
+        let mut region = SingleConfigLayouterRegion::new(self, region_index);
         let result = {
             let region: &mut dyn RegionLayouter<C> = &mut region;
             assignment(region.into())
