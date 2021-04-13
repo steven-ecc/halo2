@@ -12,9 +12,31 @@ use std::io::{self, Read, Write};
 use std::marker::PhantomData;
 
 /// Generic transcript view (from either the prover or verifier's perspective)
-pub trait Transcript<C: CurveAffine> {
+pub trait Transcript<C: CurveAffine, S: ChallengeSpace<C>> {
     /// Squeeze a challenge (in the base field) from the transcript.
     fn squeeze_challenge(&mut self) -> C::Base;
+
+    /// Squeeze a 128-bit verifier challenge from the transcript.
+    fn squeeze_challenge_128(&mut self) -> Challenge {
+        Challenge(self.squeeze_challenge().get_lower_128())
+    }
+
+    /// Get a scalar challenge from a 128-bit challenge.
+    fn to_challenge_scalar(
+        &self,
+        challenge: Challenge,
+        challenge_type: ChallengeScalarType,
+    ) -> ChallengeScalar<C> {
+        S::to_challenge_scalar(challenge, challenge_type)
+    }
+
+    /// Squeeze a scalar challenge from the transcript.
+    fn squeeze_challenge_scalar(
+        &mut self,
+        challenge_type: ChallengeScalarType,
+    ) -> ChallengeScalar<C> {
+        S::to_challenge_scalar(self.squeeze_challenge_128(), challenge_type)
+    }
 
     /// Writing the point to the transcript without writing it to the proof,
     /// treating it as a common input.
@@ -27,7 +49,7 @@ pub trait Transcript<C: CurveAffine> {
 
 /// Transcript view from the perspective of a verifier that has access to an
 /// input stream of data from the prover to the verifier.
-pub trait TranscriptRead<C: CurveAffine>: Transcript<C> {
+pub trait TranscriptRead<C: CurveAffine, S: ChallengeSpace<C>>: Transcript<C, S> {
     /// Read a curve point from the prover.
     fn read_point(&mut self) -> io::Result<C>;
 
@@ -37,7 +59,7 @@ pub trait TranscriptRead<C: CurveAffine>: Transcript<C> {
 
 /// Transcript view from the perspective of a prover that has access to an
 /// output stream of messages from the prover to the verifier.
-pub trait TranscriptWrite<C: CurveAffine>: Transcript<C> {
+pub trait TranscriptWrite<C: CurveAffine, S: ChallengeSpace<C>>: Transcript<C, S> {
     /// Write a curve point to the proof and the transcript.
     fn write_point(&mut self, point: C) -> io::Result<()>;
 
@@ -47,13 +69,14 @@ pub trait TranscriptWrite<C: CurveAffine>: Transcript<C> {
 
 /// We will replace BLAKE2b with an algebraic hash function in a later version.
 #[derive(Debug, Clone)]
-pub struct Blake2bRead<R: Read, C: CurveAffine> {
+pub struct Blake2bRead<R: Read, C: CurveAffine, S: ChallengeSpace<C>> {
     state: Blake2bState,
     reader: R,
     _marker: PhantomData<C>,
+    _marker_s: PhantomData<S>,
 }
 
-impl<R: Read, C: CurveAffine> Blake2bRead<R, C> {
+impl<R: Read, C: CurveAffine, S: ChallengeSpace<C>> Blake2bRead<R, C, S> {
     /// Initialize a transcript given an input buffer and a key.
     pub fn init(reader: R) -> Self {
         Blake2bRead {
@@ -63,11 +86,12 @@ impl<R: Read, C: CurveAffine> Blake2bRead<R, C> {
                 .to_state(),
             reader,
             _marker: PhantomData,
+            _marker_s: PhantomData,
         }
     }
 }
 
-impl<R: Read, C: CurveAffine> TranscriptRead<C> for Blake2bRead<R, C> {
+impl<R: Read, C: CurveAffine, S: ChallengeSpace<C>> TranscriptRead<C, S> for Blake2bRead<R, C, S> {
     fn read_point(&mut self) -> io::Result<C> {
         let mut compressed = C::Repr::default();
         self.reader.read_exact(compressed.as_mut())?;
@@ -94,7 +118,7 @@ impl<R: Read, C: CurveAffine> TranscriptRead<C> for Blake2bRead<R, C> {
     }
 }
 
-impl<R: Read, C: CurveAffine> Transcript<C> for Blake2bRead<R, C> {
+impl<R: Read, C: CurveAffine, S: ChallengeSpace<C>> Transcript<C, S> for Blake2bRead<R, C, S> {
     fn common_point(&mut self, point: C) -> io::Result<()> {
         let (x, y) = Option::from(point.get_xy()).ok_or_else(|| {
             io::Error::new(
@@ -124,13 +148,14 @@ impl<R: Read, C: CurveAffine> Transcript<C> for Blake2bRead<R, C> {
 
 /// We will replace BLAKE2b with an algebraic hash function in a later version.
 #[derive(Debug, Clone)]
-pub struct Blake2bWrite<W: Write, C: CurveAffine> {
+pub struct Blake2bWrite<W: Write, C: CurveAffine, S: ChallengeSpace<C>> {
     state: Blake2bState,
     writer: W,
     _marker: PhantomData<C>,
+    _marker_s: PhantomData<S>,
 }
 
-impl<W: Write, C: CurveAffine> Blake2bWrite<W, C> {
+impl<W: Write, C: CurveAffine, S: ChallengeSpace<C>> Blake2bWrite<W, C, S> {
     /// Initialize a transcript given an output buffer and a key.
     pub fn init(writer: W) -> Self {
         Blake2bWrite {
@@ -140,6 +165,7 @@ impl<W: Write, C: CurveAffine> Blake2bWrite<W, C> {
                 .to_state(),
             writer,
             _marker: PhantomData,
+            _marker_s: PhantomData,
         }
     }
 
@@ -150,7 +176,9 @@ impl<W: Write, C: CurveAffine> Blake2bWrite<W, C> {
     }
 }
 
-impl<W: Write, C: CurveAffine> TranscriptWrite<C> for Blake2bWrite<W, C> {
+impl<W: Write, C: CurveAffine, S: ChallengeSpace<C>> TranscriptWrite<C, S>
+    for Blake2bWrite<W, C, S>
+{
     fn write_point(&mut self, point: C) -> io::Result<()> {
         self.common_point(point)?;
         let compressed = point.to_bytes();
@@ -163,7 +191,7 @@ impl<W: Write, C: CurveAffine> TranscriptWrite<C> for Blake2bWrite<W, C> {
     }
 }
 
-impl<W: Write, C: CurveAffine> Transcript<C> for Blake2bWrite<W, C> {
+impl<W: Write, C: CurveAffine, S: ChallengeSpace<C>> Transcript<C, S> for Blake2bWrite<W, C, S> {
     fn common_point(&mut self, point: C) -> io::Result<()> {
         let (x, y) = Option::from(point.get_xy()).ok_or_else(|| {
             io::Error::new(
@@ -195,27 +223,77 @@ impl<W: Write, C: CurveAffine> Transcript<C> for Blake2bWrite<W, C> {
 #[derive(Copy, Clone, Debug)]
 pub struct Challenge(pub(crate) u128);
 
-impl Challenge {
-    /// Obtains a new challenge from the transcript.
-    pub fn get<C: CurveAffine, T: Transcript<C>>(transcript: &mut T) -> Challenge {
-        Challenge(transcript.squeeze_challenge().get_lower_128())
-    }
-}
-
 /// The scalar representation of a verifier challenge.
 ///
 /// The `Type` type can be used to scope the challenge to a specific context, or
-/// set to `()` if no context is required.
+/// set to `Default` if no context is required.
 #[derive(Copy, Clone, Debug)]
-pub struct ChallengeScalar<C: CurveAffine, Type> {
+pub struct ChallengeScalar<C: CurveAffine> {
     inner: C::Scalar,
-    _marker: PhantomData<Type>,
+    challenge_type: ChallengeScalarType,
 }
 
-impl<C: CurveAffine, Type> From<Challenge> for ChallengeScalar<C, Type> {
-    /// This algorithm applies the mapping of Algorithm 1 from the
-    /// [Halo](https://eprint.iacr.org/2019/1021) paper.
-    fn from(challenge: Challenge) -> Self {
+impl<C: CurveAffine> ChallengeScalar<C> {
+    /// Return the challenge type of this scalar challenge.
+    pub fn challenge_type(&self) -> ChallengeScalarType {
+        self.challenge_type
+    }
+}
+
+/// The scalar challenge types used in this commitment scheme.
+#[derive(Copy, Clone, Debug)]
+pub enum ChallengeScalarType {
+    /// The unit type when no context is required.
+    Default,
+    /// Challenge used in lookup and permutation grand products.
+    Beta,
+    /// Challenge used in lookup and permutation grand products.
+    Gamma,
+    /// Challenge used to compress expressions in lookup argument.
+    Theta,
+    /// The value at which the vanishing polynomial is evaluated.
+    X,
+    /// Challenge used to keep expressions linearly independent in the
+    /// vanishing polynomial.
+    Y,
+    /// Challenge for compressing openings at the same point sets together
+    /// in the multiopen argument.
+    X1,
+    /// Challenge for keeping the multi-point quotient polynomial terms
+    /// linearly independent in the multiopen argument.
+    X2,
+    /// Challenge point at which the commitments are opened in the
+    /// multiopen argument.
+    X3,
+    /// Challenge for collapsing the openings of the various remaining
+    /// polynomials at x_3 together in the multiopen argument.
+    X4,
+}
+
+/// The challenge space used to sample a scalar from a 128-bit challenge.
+/// This protocol supports implementations for `ChallengeScalarEndo`, which
+/// uses an endomorphism, and `ChallengeScalarFull`, which samples the
+/// full-width field.
+pub trait ChallengeSpace<C: CurveAffine> {
+    /// Derive a scalar from a 128-bit challenge in a certain challenge space.
+    fn to_challenge_scalar(
+        challenge: Challenge,
+        challenge_type: ChallengeScalarType,
+    ) -> ChallengeScalar<C>;
+}
+
+/// The scalar challenge space that applies the mapping of Algorithm 1 from the
+/// [Halo](https://eprint.iacr.org/2019/1021) paper.
+#[derive(Debug)]
+pub struct ChallengeScalarEndo<C: CurveAffine> {
+    _marker: PhantomData<C>,
+}
+
+impl<C: CurveAffine> ChallengeSpace<C> for ChallengeScalarEndo<C> {
+    fn to_challenge_scalar(
+        challenge: Challenge,
+        challenge_type: ChallengeScalarType,
+    ) -> ChallengeScalar<C> {
         let mut acc = (C::Scalar::ZETA + &C::Scalar::one()).double();
 
         for i in (0..64).rev() {
@@ -233,22 +311,32 @@ impl<C: CurveAffine, Type> From<Challenge> for ChallengeScalar<C, Type> {
 
         ChallengeScalar {
             inner: acc,
-            _marker: PhantomData,
+            challenge_type,
         }
     }
 }
 
-impl<C: CurveAffine, Type> ChallengeScalar<C, Type> {
-    /// Obtains a new challenge from the transcript.
-    pub fn get<T: Transcript<C>>(transcript: &mut T) -> Self
-    where
-        C: CurveAffine,
-    {
-        Challenge::get(transcript).into()
+/// The scalar challenge space that samples from the full-width field.
+#[derive(Debug)]
+pub struct ChallengeScalarFull<C: CurveAffine> {
+    _marker: PhantomData<C>,
+}
+
+impl<C: CurveAffine> ChallengeSpace<C> for ChallengeScalarFull<C> {
+    /// This algorithm applies the mapping of Algorithm 1 from the
+    /// [Halo](https://eprint.iacr.org/2019/1021) paper.
+    fn to_challenge_scalar(
+        challenge: Challenge,
+        challenge_type: ChallengeScalarType,
+    ) -> ChallengeScalar<C> {
+        ChallengeScalar {
+            inner: C::Scalar::from_u128(challenge.0),
+            challenge_type,
+        }
     }
 }
 
-impl<C: CurveAffine, Type> Deref for ChallengeScalar<C, Type> {
+impl<C: CurveAffine> Deref for ChallengeScalar<C> {
     type Target = C::Scalar;
 
     fn deref(&self) -> &C::Scalar {
@@ -256,14 +344,14 @@ impl<C: CurveAffine, Type> Deref for ChallengeScalar<C, Type> {
     }
 }
 
-pub(crate) fn read_n_points<C: CurveAffine, T: TranscriptRead<C>>(
+pub(crate) fn read_n_points<C: CurveAffine, S: ChallengeSpace<C>, T: TranscriptRead<C, S>>(
     transcript: &mut T,
     n: usize,
 ) -> io::Result<Vec<C>> {
     (0..n).map(|_| transcript.read_point()).collect()
 }
 
-pub(crate) fn read_n_scalars<C: CurveAffine, T: TranscriptRead<C>>(
+pub(crate) fn read_n_scalars<C: CurveAffine, S: ChallengeSpace<C>, T: TranscriptRead<C, S>>(
     transcript: &mut T,
     n: usize,
 ) -> io::Result<Vec<C::Scalar>> {
