@@ -2,9 +2,12 @@ use ff::Field;
 
 use crate::{
     arithmetic::CurveAffine,
-    plonk::{ChallengeX, ChallengeY, Error, VerifyingKey},
+    plonk::{Error, VerifyingKey},
     poly::multiopen::VerifierQuery,
-    transcript::{read_n_points, read_n_scalars, TranscriptRead},
+    transcript::{
+        read_n_points, read_n_scalars, ChallengeScalar, ChallengeScalarType, ChallengeSpace,
+        TranscriptRead,
+    },
 };
 
 use super::Argument;
@@ -19,7 +22,7 @@ pub struct Evaluated<C: CurveAffine> {
 }
 
 impl<C: CurveAffine> Argument<C> {
-    pub(in crate::plonk) fn read_commitments<T: TranscriptRead<C>>(
+    pub(in crate::plonk) fn read_commitments<S: ChallengeSpace<C>, T: TranscriptRead<C, S>>(
         vk: &VerifyingKey<C>,
         transcript: &mut T,
     ) -> Result<Committed<C>, Error> {
@@ -32,7 +35,7 @@ impl<C: CurveAffine> Argument<C> {
 }
 
 impl<C: CurveAffine> Committed<C> {
-    pub(in crate::plonk) fn evaluate<T: TranscriptRead<C>>(
+    pub(in crate::plonk) fn evaluate<S: ChallengeSpace<C>, T: TranscriptRead<C, S>>(
         self,
         transcript: &mut T,
     ) -> Result<Evaluated<C>, Error> {
@@ -50,9 +53,11 @@ impl<C: CurveAffine> Evaluated<C> {
     pub(in crate::plonk) fn verify(
         &self,
         expressions: impl Iterator<Item = C::Scalar>,
-        y: ChallengeY<C>,
+        y: ChallengeScalar<C>,
         xn: C::Scalar,
     ) -> Result<(), Error> {
+        assert!(matches!(y.challenge_type(), ChallengeScalarType::Y));
+
         let expected_h_eval = expressions.fold(C::Scalar::zero(), |h_eval, v| h_eval * &*y + &v);
 
         // Compute h(x) from the prover
@@ -72,8 +77,10 @@ impl<C: CurveAffine> Evaluated<C> {
 
     pub(in crate::plonk) fn queries(
         &self,
-        x: ChallengeX<C>,
+        x: ChallengeScalar<C>,
     ) -> impl Iterator<Item = VerifierQuery<'_, C>> + Clone {
+        assert!(matches!(x.challenge_type(), ChallengeScalarType::X));
+
         self.h_commitments
             .iter()
             .zip(self.h_evals.iter())

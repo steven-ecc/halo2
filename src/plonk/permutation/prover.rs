@@ -6,13 +6,13 @@ use super::super::circuit::Any;
 use super::{Argument, ProvingKey};
 use crate::{
     arithmetic::{eval_polynomial, parallelize, BatchInvert, CurveAffine, FieldExt},
-    plonk::{self, ChallengeBeta, ChallengeGamma, ChallengeX, Error},
+    plonk::{self, Error},
     poly::{
         commitment::{Blind, Params},
         multiopen::ProverQuery,
         Coeff, ExtendedLagrangeCoeff, LagrangeCoeff, Polynomial, Rotation,
     },
-    transcript::TranscriptWrite,
+    transcript::{ChallengeScalar, ChallengeScalarType, ChallengeSpace, TranscriptWrite},
 };
 
 pub(crate) struct Committed<C: CurveAffine> {
@@ -32,7 +32,11 @@ pub(crate) struct Evaluated<C: CurveAffine> {
 }
 
 impl Argument {
-    pub(in crate::plonk) fn commit<C: CurveAffine, T: TranscriptWrite<C>>(
+    pub(in crate::plonk) fn commit<
+        C: CurveAffine,
+        S: ChallengeSpace<C>,
+        T: TranscriptWrite<C, S>,
+    >(
         &self,
         params: &Params<C>,
         pk: &plonk::ProvingKey<C>,
@@ -40,10 +44,13 @@ impl Argument {
         advice: &[Polynomial<C::Scalar, LagrangeCoeff>],
         fixed: &[Polynomial<C::Scalar, LagrangeCoeff>],
         instance: &[Polynomial<C::Scalar, LagrangeCoeff>],
-        beta: ChallengeBeta<C>,
-        gamma: ChallengeGamma<C>,
+        beta: ChallengeScalar<C>,
+        gamma: ChallengeScalar<C>,
         transcript: &mut T,
     ) -> Result<Committed<C>, Error> {
+        assert!(matches!(beta.challenge_type(), ChallengeScalarType::Beta));
+        assert!(matches!(gamma.challenge_type(), ChallengeScalarType::Gamma));
+
         let domain = &pk.vk.domain;
 
         // Goal is to compute the products of fractions
@@ -155,12 +162,15 @@ impl<C: CurveAffine> Committed<C> {
         advice_cosets: &'a [Polynomial<C::Scalar, ExtendedLagrangeCoeff>],
         fixed_cosets: &'a [Polynomial<C::Scalar, ExtendedLagrangeCoeff>],
         instance_cosets: &'a [Polynomial<C::Scalar, ExtendedLagrangeCoeff>],
-        beta: ChallengeBeta<C>,
-        gamma: ChallengeGamma<C>,
+        beta: ChallengeScalar<C>,
+        gamma: ChallengeScalar<C>,
     ) -> (
         Constructed<C>,
         impl Iterator<Item = Polynomial<C::Scalar, ExtendedLagrangeCoeff>> + 'a,
     ) {
+        assert!(matches!(beta.challenge_type(), ChallengeScalarType::Beta));
+        assert!(matches!(gamma.challenge_type(), ChallengeScalarType::Gamma));
+
         let domain = &pk.vk.domain;
         let expressions = iter::empty()
             // l_0(X) * (1 - z(X)) = 0
@@ -236,14 +246,16 @@ impl<C: CurveAffine> Committed<C> {
 }
 
 impl<C: CurveAffine> super::ProvingKey<C> {
-    fn evaluate(&self, x: ChallengeX<C>) -> Vec<C::Scalar> {
+    fn evaluate(&self, x: ChallengeScalar<C>) -> Vec<C::Scalar> {
+        assert!(matches!(x.challenge_type(), ChallengeScalarType::X));
+
         self.polys
             .iter()
             .map(|poly| eval_polynomial(poly, *x))
             .collect()
     }
 
-    fn open(&self, x: ChallengeX<C>) -> impl Iterator<Item = ProverQuery<'_, C>> + Clone {
+    fn open(&self, x: ChallengeScalar<C>) -> impl Iterator<Item = ProverQuery<'_, C>> + Clone {
         self.polys.iter().map(move |poly| ProverQuery {
             point: *x,
             poly,
@@ -253,11 +265,11 @@ impl<C: CurveAffine> super::ProvingKey<C> {
 }
 
 impl<C: CurveAffine> Constructed<C> {
-    pub(in crate::plonk) fn evaluate<T: TranscriptWrite<C>>(
+    pub(in crate::plonk) fn evaluate<S: ChallengeSpace<C>, T: TranscriptWrite<C, S>>(
         self,
         pk: &plonk::ProvingKey<C>,
         pkey: &ProvingKey<C>,
-        x: ChallengeX<C>,
+        x: ChallengeScalar<C>,
         transcript: &mut T,
     ) -> Result<Evaluated<C>, Error> {
         let domain = &pk.vk.domain;
@@ -291,7 +303,7 @@ impl<C: CurveAffine> Evaluated<C> {
         &'a self,
         pk: &'a plonk::ProvingKey<C>,
         pkey: &'a ProvingKey<C>,
-        x: ChallengeX<C>,
+        x: ChallengeScalar<C>,
     ) -> impl Iterator<Item = ProverQuery<'a, C>> + Clone {
         let x_inv = pk.vk.domain.rotate_omega(*x, Rotation(-1));
 

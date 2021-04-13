@@ -3,13 +3,13 @@ use group::Curve;
 use super::Argument;
 use crate::{
     arithmetic::{eval_polynomial, CurveAffine, FieldExt},
-    plonk::{ChallengeX, ChallengeY, Error},
+    plonk::Error,
     poly::{
         commitment::{Blind, Params},
         multiopen::ProverQuery,
         Coeff, EvaluationDomain, ExtendedLagrangeCoeff, Polynomial,
     },
-    transcript::TranscriptWrite,
+    transcript::{ChallengeScalar, ChallengeScalarType, ChallengeSpace, TranscriptWrite},
 };
 
 pub(in crate::plonk) struct Constructed<C: CurveAffine> {
@@ -22,13 +22,15 @@ pub(in crate::plonk) struct Evaluated<C: CurveAffine> {
 }
 
 impl<C: CurveAffine> Argument<C> {
-    pub(in crate::plonk) fn construct<T: TranscriptWrite<C>>(
+    pub(in crate::plonk) fn construct<S: ChallengeSpace<C>, T: TranscriptWrite<C, S>>(
         params: &Params<C>,
         domain: &EvaluationDomain<C::Scalar>,
         expressions: impl Iterator<Item = Polynomial<C::Scalar, ExtendedLagrangeCoeff>>,
-        y: ChallengeY<C>,
+        y: ChallengeScalar<C>,
         transcript: &mut T,
     ) -> Result<Constructed<C>, Error> {
+        assert!(matches!(y.challenge_type(), ChallengeScalarType::Y));
+
         // Evaluate the h(X) polynomial's constraint system expressions for the constraints provided
         let h_poly = expressions.fold(domain.empty_extended(), |h_poly, v| h_poly * *y + &v);
 
@@ -68,11 +70,13 @@ impl<C: CurveAffine> Argument<C> {
 }
 
 impl<C: CurveAffine> Constructed<C> {
-    pub(in crate::plonk) fn evaluate<T: TranscriptWrite<C>>(
+    pub(in crate::plonk) fn evaluate<S: ChallengeSpace<C>, T: TranscriptWrite<C, S>>(
         self,
-        x: ChallengeX<C>,
+        x: ChallengeScalar<C>,
         transcript: &mut T,
     ) -> Result<Evaluated<C>, Error> {
+        assert!(matches!(x.challenge_type(), ChallengeScalarType::X));
+
         let h_evals: Vec<_> = self
             .h_pieces
             .iter()
@@ -93,8 +97,10 @@ impl<C: CurveAffine> Constructed<C> {
 impl<C: CurveAffine> Evaluated<C> {
     pub(in crate::plonk) fn open(
         &self,
-        x: ChallengeX<C>,
+        x: ChallengeScalar<C>,
     ) -> impl Iterator<Item = ProverQuery<'_, C>> + Clone {
+        assert!(matches!(x.challenge_type(), ChallengeScalarType::X));
+
         self.constructed
             .h_pieces
             .iter()

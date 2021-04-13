@@ -1,7 +1,4 @@
-use super::super::{
-    circuit::Expression, ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX, Error,
-    ProvingKey,
-};
+use super::super::{circuit::Expression, Error, ProvingKey};
 use super::Argument;
 use crate::{
     arithmetic::{eval_polynomial, parallelize, BatchInvert, CurveAffine, FieldExt},
@@ -10,7 +7,7 @@ use crate::{
         multiopen::ProverQuery,
         Coeff, EvaluationDomain, ExtendedLagrangeCoeff, LagrangeCoeff, Polynomial, Rotation,
     },
-    transcript::TranscriptWrite,
+    transcript::{ChallengeScalar, ChallengeScalarType, ChallengeSpace, TranscriptWrite},
 };
 use ff::Field;
 use group::Curve;
@@ -72,12 +69,12 @@ impl<F: FieldExt> Argument<F> {
     /// - constructs Permuted<C> struct using permuted_input_value = A', and
     ///   permuted_table_expression = S'.
     /// The Permuted<C> struct is used to update the Lookup, and is then returned.
-    pub(in crate::plonk) fn commit_permuted<'a, C, T: TranscriptWrite<C>>(
+    pub(in crate::plonk) fn commit_permuted<'a, C, S: ChallengeSpace<C>, T: TranscriptWrite<C, S>>(
         &self,
         pk: &ProvingKey<C>,
         params: &Params<C>,
         domain: &EvaluationDomain<C::Scalar>,
-        theta: ChallengeTheta<C>,
+        theta: ChallengeScalar<C>,
         advice_values: &'a [Polynomial<C::Scalar, LagrangeCoeff>],
         fixed_values: &'a [Polynomial<C::Scalar, LagrangeCoeff>],
         instance_values: &'a [Polynomial<C::Scalar, LagrangeCoeff>],
@@ -90,6 +87,8 @@ impl<F: FieldExt> Argument<F> {
         C: CurveAffine<ScalarExt = F>,
         C::Curve: Mul<F, Output = C::Curve> + MulAssign<F>,
     {
+        assert!(matches!(theta.challenge_type(), ChallengeScalarType::Theta));
+
         // Closure to get values of expressions and compress them
         let compress_expressions = |expressions: &[Expression<C::Scalar>]| {
             // Values of input expressions involved in the lookup
@@ -244,15 +243,19 @@ impl<C: CurveAffine> Permuted<C> {
     /// grand product polynomial over the lookup. The grand product polynomial
     /// is used to populate the Product<C> struct. The Product<C> struct is
     /// added to the Lookup and finally returned by the method.
-    pub(in crate::plonk) fn commit_product<T: TranscriptWrite<C>>(
+    pub(in crate::plonk) fn commit_product<S: ChallengeSpace<C>, T: TranscriptWrite<C, S>>(
         self,
         pk: &ProvingKey<C>,
         params: &Params<C>,
-        theta: ChallengeTheta<C>,
-        beta: ChallengeBeta<C>,
-        gamma: ChallengeGamma<C>,
+        theta: ChallengeScalar<C>,
+        beta: ChallengeScalar<C>,
+        gamma: ChallengeScalar<C>,
         transcript: &mut T,
     ) -> Result<Committed<C>, Error> {
+        assert!(matches!(theta.challenge_type(), ChallengeScalarType::Theta));
+        assert!(matches!(beta.challenge_type(), ChallengeScalarType::Beta));
+        assert!(matches!(gamma.challenge_type(), ChallengeScalarType::Gamma));
+
         // Goal is to compute the products of fractions
         //
         // Numerator: (\theta^{m-1} a_0(\omega^i) + \theta^{m-2} a_1(\omega^i) + ... + \theta a_{m-2}(\omega^i) + a_{m-1}(\omega^i) + \beta)
@@ -400,13 +403,17 @@ impl<'a, C: CurveAffine> Committed<C> {
     pub(in crate::plonk) fn construct(
         self,
         pk: &'a ProvingKey<C>,
-        theta: ChallengeTheta<C>,
-        beta: ChallengeBeta<C>,
-        gamma: ChallengeGamma<C>,
+        theta: ChallengeScalar<C>,
+        beta: ChallengeScalar<C>,
+        gamma: ChallengeScalar<C>,
     ) -> (
         Constructed<C>,
         impl Iterator<Item = Polynomial<C::Scalar, ExtendedLagrangeCoeff>> + 'a,
     ) {
+        assert!(matches!(theta.challenge_type(), ChallengeScalarType::Theta));
+        assert!(matches!(beta.challenge_type(), ChallengeScalarType::Beta));
+        assert!(matches!(gamma.challenge_type(), ChallengeScalarType::Gamma));
+
         let permuted = self.permuted;
 
         let expressions = iter::empty()
@@ -488,12 +495,14 @@ impl<'a, C: CurveAffine> Committed<C> {
 }
 
 impl<C: CurveAffine> Constructed<C> {
-    pub(in crate::plonk) fn evaluate<T: TranscriptWrite<C>>(
+    pub(in crate::plonk) fn evaluate<S: ChallengeSpace<C>, T: TranscriptWrite<C, S>>(
         self,
         pk: &ProvingKey<C>,
-        x: ChallengeX<C>,
+        x: ChallengeScalar<C>,
         transcript: &mut T,
     ) -> Result<Evaluated<C>, Error> {
+        assert!(matches!(x.challenge_type(), ChallengeScalarType::X));
+
         let domain = &pk.vk.domain;
         let x_inv = domain.rotate_omega(*x, Rotation(-1));
 
@@ -524,8 +533,10 @@ impl<C: CurveAffine> Evaluated<C> {
     pub(in crate::plonk) fn open<'a>(
         &'a self,
         pk: &'a ProvingKey<C>,
-        x: ChallengeX<C>,
+        x: ChallengeScalar<C>,
     ) -> impl Iterator<Item = ProverQuery<'a, C>> + Clone {
+        assert!(matches!(x.challenge_type(), ChallengeScalarType::X));
+
         let x_inv = pk.vk.domain.rotate_omega(*x, Rotation(-1));
 
         iter::empty()

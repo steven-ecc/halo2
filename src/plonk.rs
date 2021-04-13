@@ -12,7 +12,7 @@ use crate::poly::{
     commitment::Params, Coeff, EvaluationDomain, ExtendedLagrangeCoeff, LagrangeCoeff,
     PinnedEvaluationDomain, Polynomial,
 };
-use crate::transcript::{ChallengeScalar, Transcript};
+use crate::transcript::{ChallengeSpace, Transcript};
 
 mod circuit;
 mod keygen;
@@ -79,7 +79,10 @@ impl<C: CurveAffine> VerifyingKey<C> {
     }
 
     /// Hashes a verification key into a transcript.
-    pub fn hash_into<T: Transcript<C>>(&self, transcript: &mut T) -> io::Result<()> {
+    pub fn hash_into<S: ChallengeSpace<C>, T: Transcript<C, S>>(
+        &self,
+        transcript: &mut T,
+    ) -> io::Result<()> {
         let mut hasher = Blake2bParams::new()
             .hash_length(64)
             .personal(b"Halo2-Verify-Key")
@@ -167,23 +170,3 @@ impl<C: CurveAffine> VerifyingKey<C> {
         &self.domain
     }
 }
-
-#[derive(Clone, Copy, Debug)]
-struct Theta;
-type ChallengeTheta<F> = ChallengeScalar<F, Theta>;
-
-#[derive(Clone, Copy, Debug)]
-struct Beta;
-type ChallengeBeta<F> = ChallengeScalar<F, Beta>;
-
-#[derive(Clone, Copy, Debug)]
-struct Gamma;
-type ChallengeGamma<F> = ChallengeScalar<F, Gamma>;
-
-#[derive(Clone, Copy, Debug)]
-struct Y;
-type ChallengeY<F> = ChallengeScalar<F, Y>;
-
-#[derive(Clone, Copy, Debug)]
-struct X;
-type ChallengeX<F> = ChallengeScalar<F, X>;

@@ -6,37 +6,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::*;
-use crate::{
-    arithmetic::{CurveAffine, FieldExt},
-    transcript::ChallengeScalar,
-};
+use crate::arithmetic::{CurveAffine, FieldExt};
 
 mod prover;
 mod verifier;
 
 pub use prover::create_proof;
 pub use verifier::verify_proof;
-
-#[derive(Clone, Copy, Debug)]
-struct X1 {}
-/// Challenge for compressing openings at the same point sets together.
-type ChallengeX1<F> = ChallengeScalar<F, X1>;
-
-#[derive(Clone, Copy, Debug)]
-struct X2 {}
-/// Challenge for keeping the multi-point quotient polynomial terms linearly independent.
-type ChallengeX2<F> = ChallengeScalar<F, X2>;
-
-#[derive(Clone, Copy, Debug)]
-struct X3 {}
-/// Challenge point at which the commitments are opened.
-type ChallengeX3<F> = ChallengeScalar<F, X3>;
-
-#[derive(Clone, Copy, Debug)]
-struct X4 {}
-/// Challenge for collapsing the openings of the various remaining polynomials at x_3
-/// together.
-type ChallengeX4<F> = ChallengeScalar<F, X4>;
 
 /// A polynomial query at a point
 #[derive(Debug, Clone)]
@@ -211,6 +187,7 @@ fn test_roundtrip() {
     use super::commitment::{Blind, Params};
     use crate::arithmetic::{eval_polynomial, FieldExt};
     use crate::pasta::{EqAffine, Fp};
+    use crate::transcript::ChallengeScalarEndo;
 
     const K: u32 = 4;
 
@@ -244,7 +221,8 @@ fn test_roundtrip() {
     let bvx = eval_polynomial(&bx, x);
     let cvy = eval_polynomial(&cx, y);
 
-    let mut transcript = crate::transcript::Blake2bWrite::init(vec![]);
+    let mut transcript =
+        crate::transcript::Blake2bWrite::<_, _, ChallengeScalarEndo<EqAffine>>::init(vec![]);
     create_proof(
         &params,
         &mut transcript,
@@ -270,7 +248,8 @@ fn test_roundtrip() {
 
     {
         let mut proof = &proof[..];
-        let mut transcript = crate::transcript::Blake2bRead::init(&mut proof);
+        let mut transcript =
+            crate::transcript::Blake2bRead::<_, _, ChallengeScalarEndo<EqAffine>>::init(&mut proof);
         let msm = params.empty_msm();
 
         let guard = verify_proof(
@@ -303,7 +282,8 @@ fn test_roundtrip() {
     {
         let mut proof = &proof[..];
 
-        let mut transcript = crate::transcript::Blake2bRead::init(&mut proof);
+        let mut transcript =
+            crate::transcript::Blake2bRead::<_, _, ChallengeScalarEndo<EqAffine>>::init(&mut proof);
         let msm = params.empty_msm();
 
         let guard = verify_proof(

@@ -4,9 +4,9 @@ use super::super::circuit::Expression;
 use super::Argument;
 use crate::{
     arithmetic::{CurveAffine, FieldExt},
-    plonk::{ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX, Error, VerifyingKey},
+    plonk::{Error, VerifyingKey},
     poly::{multiopen::VerifierQuery, Rotation},
-    transcript::TranscriptRead,
+    transcript::{ChallengeScalar, ChallengeScalarType, ChallengeSpace, TranscriptRead},
 };
 use ff::Field;
 
@@ -30,7 +30,11 @@ pub struct Evaluated<C: CurveAffine> {
 }
 
 impl<F: FieldExt> Argument<F> {
-    pub(in crate::plonk) fn read_permuted_commitments<C: CurveAffine, T: TranscriptRead<C>>(
+    pub(in crate::plonk) fn read_permuted_commitments<
+        C: CurveAffine,
+        S: ChallengeSpace<C>,
+        T: TranscriptRead<C, S>,
+    >(
         &self,
         transcript: &mut T,
     ) -> Result<PermutationCommitments<C>, Error> {
@@ -49,7 +53,10 @@ impl<F: FieldExt> Argument<F> {
 }
 
 impl<C: CurveAffine> PermutationCommitments<C> {
-    pub(in crate::plonk) fn read_product_commitment<T: TranscriptRead<C>>(
+    pub(in crate::plonk) fn read_product_commitment<
+        S: ChallengeSpace<C>,
+        T: TranscriptRead<C, S>,
+    >(
         self,
         transcript: &mut T,
     ) -> Result<Committed<C>, Error> {
@@ -65,7 +72,7 @@ impl<C: CurveAffine> PermutationCommitments<C> {
 }
 
 impl<C: CurveAffine> Committed<C> {
-    pub(crate) fn evaluate<T: TranscriptRead<C>>(
+    pub(crate) fn evaluate<S: ChallengeSpace<C>, T: TranscriptRead<C, S>>(
         self,
         transcript: &mut T,
     ) -> Result<Evaluated<C>, Error> {
@@ -101,13 +108,17 @@ impl<C: CurveAffine> Evaluated<C> {
         &'a self,
         l_0: C::Scalar,
         argument: &'a Argument<C::Scalar>,
-        theta: ChallengeTheta<C>,
-        beta: ChallengeBeta<C>,
-        gamma: ChallengeGamma<C>,
+        theta: ChallengeScalar<C>,
+        beta: ChallengeScalar<C>,
+        gamma: ChallengeScalar<C>,
         advice_evals: &[C::Scalar],
         fixed_evals: &[C::Scalar],
         instance_evals: &[C::Scalar],
     ) -> impl Iterator<Item = C::Scalar> + 'a {
+        assert!(matches!(theta.challenge_type(), ChallengeScalarType::Theta));
+        assert!(matches!(beta.challenge_type(), ChallengeScalarType::Beta));
+        assert!(matches!(gamma.challenge_type(), ChallengeScalarType::Gamma));
+
         let product_expression = || {
             // z'(X) (a'(X) + \beta) (s'(X) + \gamma)
             // - z'(\omega^{-1} X) (\theta^{m-1} a_0(X) + ... + a_{m-1}(X) + \beta) (\theta^{m-1} s_0(X) + ... + s_{m-1}(X) + \gamma)
@@ -162,8 +173,10 @@ impl<C: CurveAffine> Evaluated<C> {
     pub(in crate::plonk) fn queries<'a>(
         &'a self,
         vk: &'a VerifyingKey<C>,
-        x: ChallengeX<C>,
+        x: ChallengeScalar<C>,
     ) -> impl Iterator<Item = VerifierQuery<'a, C>> + Clone {
+        assert!(matches!(x.challenge_type(), ChallengeScalarType::X));
+
         let x_inv = vk.domain.rotate_omega(*x, Rotation(-1));
 
         iter::empty()

@@ -5,9 +5,9 @@ use super::super::circuit::Any;
 use super::{Argument, VerifyingKey};
 use crate::{
     arithmetic::{CurveAffine, FieldExt},
-    plonk::{self, ChallengeBeta, ChallengeGamma, ChallengeX, Error},
+    plonk::{self, Error},
     poly::{multiopen::VerifierQuery, Rotation},
-    transcript::TranscriptRead,
+    transcript::{ChallengeScalar, ChallengeScalarType, ChallengeSpace, TranscriptRead},
 };
 
 pub struct Committed<C: CurveAffine> {
@@ -22,7 +22,11 @@ pub struct Evaluated<C: CurveAffine> {
 }
 
 impl Argument {
-    pub(crate) fn read_product_commitment<C: CurveAffine, T: TranscriptRead<C>>(
+    pub(crate) fn read_product_commitment<
+        C: CurveAffine,
+        S: ChallengeSpace<C>,
+        T: TranscriptRead<C, S>,
+    >(
         &self,
         transcript: &mut T,
     ) -> Result<Committed<C>, Error> {
@@ -37,7 +41,7 @@ impl Argument {
 }
 
 impl<C: CurveAffine> Committed<C> {
-    pub(crate) fn evaluate<T: TranscriptRead<C>>(
+    pub(crate) fn evaluate<S: ChallengeSpace<C>, T: TranscriptRead<C, S>>(
         self,
         vkey: &VerifyingKey<C>,
         transcript: &mut T,
@@ -75,10 +79,14 @@ impl<C: CurveAffine> Evaluated<C> {
         fixed_evals: &[C::Scalar],
         instance_evals: &'a [C::Scalar],
         l_0: C::Scalar,
-        beta: ChallengeBeta<C>,
-        gamma: ChallengeGamma<C>,
-        x: ChallengeX<C>,
+        beta: ChallengeScalar<C>,
+        gamma: ChallengeScalar<C>,
+        x: ChallengeScalar<C>,
     ) -> impl Iterator<Item = C::Scalar> + 'a {
+        assert!(matches!(beta.challenge_type(), ChallengeScalarType::Beta));
+        assert!(matches!(gamma.challenge_type(), ChallengeScalarType::Gamma));
+        assert!(matches!(x.challenge_type(), ChallengeScalarType::X));
+
         iter::empty()
             // l_0(X) * (1 - z(X)) = 0
             .chain(Some(
@@ -128,8 +136,10 @@ impl<C: CurveAffine> Evaluated<C> {
         &'a self,
         vk: &'a plonk::VerifyingKey<C>,
         vkey: &'a VerifyingKey<C>,
-        x: ChallengeX<C>,
+        x: ChallengeScalar<C>,
     ) -> impl Iterator<Item = VerifierQuery<'a, C>> + Clone {
+        assert!(matches!(x.challenge_type(), ChallengeScalarType::X));
+
         let x_inv = vk.domain.rotate_omega(*x, Rotation(-1));
 
         iter::empty()

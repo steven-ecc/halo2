@@ -2,13 +2,10 @@ use super::super::{
     commitment::{self, Blind, Params},
     Coeff, Polynomial,
 };
-use super::{
-    construct_intermediate_sets, ChallengeX1, ChallengeX2, ChallengeX3, ChallengeX4, ProverQuery,
-    Query,
-};
+use super::{construct_intermediate_sets, ProverQuery, Query};
 
 use crate::arithmetic::{eval_polynomial, kate_division, CurveAffine, FieldExt};
-use crate::transcript::TranscriptWrite;
+use crate::transcript::{ChallengeScalarType, ChallengeSpace, TranscriptWrite};
 
 use ff::Field;
 use group::Curve;
@@ -24,7 +21,7 @@ struct CommitmentData<C: CurveAffine> {
 }
 
 /// Create a multi-opening proof
-pub fn create_proof<'a, I, C: CurveAffine, T: TranscriptWrite<C>>(
+pub fn create_proof<'a, I, C: CurveAffine, S: ChallengeSpace<C>, T: TranscriptWrite<C, S>>(
     params: &Params<C>,
     transcript: &mut T,
     queries: I,
@@ -32,8 +29,8 @@ pub fn create_proof<'a, I, C: CurveAffine, T: TranscriptWrite<C>>(
 where
     I: IntoIterator<Item = ProverQuery<'a, C>> + Clone,
 {
-    let x_1 = ChallengeX1::get(transcript);
-    let x_2 = ChallengeX2::get(transcript);
+    let x_1 = transcript.squeeze_challenge_scalar(ChallengeScalarType::X1);
+    let x_2 = transcript.squeeze_challenge_scalar(ChallengeScalarType::X2);
 
     let (poly_map, point_sets) = construct_intermediate_sets(queries);
 
@@ -91,7 +88,7 @@ where
 
     transcript.write_point(f_commitment)?;
 
-    let x_3 = ChallengeX3::get(transcript);
+    let x_3 = transcript.squeeze_challenge_scalar(ChallengeScalarType::X3);
 
     let q_evals: Vec<C::Scalar> = q_polys
         .iter()
@@ -102,7 +99,7 @@ where
         transcript.write_scalar(*eval)?;
     }
 
-    let x_4 = ChallengeX4::get(transcript);
+    let x_4 = transcript.squeeze_challenge_scalar(ChallengeScalarType::X4);
 
     let (f_poly, f_blind_try) = q_polys.iter().zip(q_blinds.iter()).fold(
         (f_poly, f_blind),
