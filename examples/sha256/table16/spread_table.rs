@@ -341,7 +341,7 @@ mod tests {
                             0,
                             || Ok(dense),
                         )?;
-                        let cell = region.assign_advice(
+                        region.assign_advice(
                             || "spread",
                             Column::<Advice>::try_from(input_spread).unwrap(),
                             0,
